@@ -64,10 +64,7 @@ function writeData()
         {
             console.log("Error at writing data");
         }
-        else
-        {
-            console.log("Wrote data");
-        }
+       
     })
 }
 
@@ -206,6 +203,7 @@ function setPadej(msg, words)
         if(isMention(words[0]))
         {
             userID = idFromMention(words[0])
+            
         }
         else
         {
@@ -216,27 +214,18 @@ function setPadej(msg, words)
     
     if(data["g" + msg.guildId] == null)
         data["g" + msg.guildId] = {};
-    let gld = data["g" + msg.guildId];
 
-    if(gld == null)
-    {
-        gld = {
-            
-        }
-    }
-    if(gld["u" + userID] == null)
-    {
-        gld["u" + userID] = {
-            aliases : []
-        }
-    }
+
+    if(data["g" + msg.guildId]["u" + userID] == null)
+        data["g" + msg.guildId]["u" + userID] = {};
+
+
 
     let d = (self) ? 0 : 1;
 
 
-    gld["u" + userID].padej = words[d];
+    data["g" + msg.guildId]["u" + userID].padej = words[d];
 
-    data["g" + msg.guildId] = gld;
 
     writeData();
 
@@ -257,7 +246,7 @@ async function setWaiting(msg, words)
     {
         return null;
     }
-    let name = "Ждём " + padej;
+    let name = "Ожидание " + padej;
     
 
     msg.guild.channels.create(name, {
@@ -294,14 +283,12 @@ async function getPadejById(guildId, userId)
             {
                 if(data["g" + guildId]["u" + userId].padej != null)
                 {
-                    console.log("here");
                     return data["g" + guildId]["u" + userId].padej;
 
                 }
             }
         } 
     }
-    console.log("not here")
 
     let user = await client.users.fetch(userId);
     padej = user.username;
@@ -413,12 +400,12 @@ client.on('messageCreate', message => {
     
     let fWord = words.shift();
 
-    if(fWord == "addalias" || fWord == "addnick")
+    if(fWord == "addalias" || fWord == "addnick" || fWord == "nick" || fWord == "alias")
     {
         addAlias(message, words);
     }
 
-    if(fWord == "setpadej")
+    if(fWord == "padej")
     {
         setPadej(message, words);
     }
@@ -433,7 +420,7 @@ client.on('messageCreate', message => {
     {
         setWaiting(message, words);
     }
-    if(fWord == "setmove")
+    if(fWord == "moveto")
     {
         setMove(message, words);
     }
@@ -444,15 +431,17 @@ client.on('messageCreate', message => {
             let a = await client.guilds.fetch('198395676663480320');
             // console.log(a);
             let con = joinVoiceChannel({
-                channelId: "939446186945970177",
+                channelId: "939542412768981043",
                 guildId: "198395676663480320",
                 adapterCreator: a.voiceAdapterCreator
             });
             let time = 5000;
-            if(words[1] != null && !isNaN(words[1]))
+            if(words[0] != null)
             {
-                time = parseFloat(words[1])*1000;
+                console.log("a ?");
+                time = parseFloat(words[0])*1000;
             }
+            console.log("Time: " + time);
             await sleep(time);
             con.destroy();
 
@@ -468,7 +457,7 @@ client.on('voiceStateUpdate', async (old, newc) =>
 {
     let ob;
     let joined;
-    if(old.channelId == null && newc.channelId != null)
+    if(newc.channelId != null)
     {
         ob = newc;
         joined = true;
@@ -479,7 +468,9 @@ client.on('voiceStateUpdate', async (old, newc) =>
         joined = false;
     }
     
+    
     // console.log(ob);
+    
     let guild = await client.guilds.fetch(ob.guild.id);
     let ch = await client.channels.fetch(ob.channelId);
     let us = await client.users.fetch(ob.id);
@@ -487,9 +478,10 @@ client.on('voiceStateUpdate', async (old, newc) =>
     
     if(!joined)
         return;
-    if(data["g" + ob.guild.id] == null)
+
+    if(data["g" + guild.id] == null)
         return;
-    if(data["g" + ob.guild.id].active == null)
+    if(data["g" + guild.id].active == null)
         return;
     
     for(let i = 0; i < data["g" + ob.guild.id].active.length; i++)
@@ -501,19 +493,70 @@ client.on('voiceStateUpdate', async (old, newc) =>
         
         if(wait.chId != ob.channelId)
             continue;
-            
-        let gen = await client.channels.fetch("198395676663480321");
+
+        console.log("End wait on " + ch.name);
+        
+        let moveto;
+        if(data["g" + guild.id].moveto != null)
+        {
+            moveto = await client.channels.fetch(data["g" + guild.id].moveto);
+            console.log("First channel");
+
+        }
+        else
+        {
+            let channels = await guild.channels.fetch();
+            moveto = channels.find(e => {
+                if(e.type != 'GUILD_VOICE')
+                    return false;
+                return formatText(e.name).includes(formatText("gen"));
+            });
+            if(moveto == null)
+            {
+                console.log("Third channel");
+                
+                for(let k = 0; k < channels.size; k++)
+                {
+                    if(channels.at(k).type == "GUILD_VOICE")
+                    {
+                        moveto = channels.at(k);
+                        break;
+                    }
+                }
+                    
+            }
+            else
+            {
+                console.log("Second channel");
+
+            }
+        }
+        
+        if(moveto == null)
+        {
+            console.log("error no voice channels");
+            return;
+        }
+
+
+        
+
+
+
+
+     
         for(let j = 0; j < guild.members.cache.size; j++)
         {
             if(guild.members.cache.at(j).voice.channelId == ob.channelId)
-                guild.members.cache.at(j).voice.setChannel(gen);
+                await guild.members.cache.at(j).voice.setChannel(moveto);
         }
 
         let messageChannel = await client.channels.fetch(wait.initChId);
         let pad = await getPadejById(guild.id, us.id);
-        messageChannel.send("Дождались " + pad + " :clap:");
+        messageChannel.send("Дождались дебила)");
         ch.delete();
         data["g" + ob.guild.id].active.splice(i, 1);
+        writeData();
 
         break;
         
