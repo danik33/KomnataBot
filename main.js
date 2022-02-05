@@ -246,11 +246,11 @@ function setPadej(msg, words)
 }
 
 
-function setWaiting(msg, words)
+async function setWaiting(msg, words)
 {
     console.log("Wait call");
     let id = idFromMention(words[0]);
-    let padej = getPadejById(msg, id);
+    let padej = await getPadejById(msg.guildId, id);
     padej = padej.charAt(0).toUpperCase() + padej.slice(1);
 
     if(padej == null)
@@ -273,7 +273,7 @@ function setWaiting(msg, words)
         if(data["g" + msg.guildId].active == null)
             data["g" + msg.guildId].active = [];
         
-        data["g" + msg.guildId].active.push({"name" : name, "chId" : v.id, "userId" : id, "startTime" : Date.now(), "gldId" : msg.guildId});
+        data["g" + msg.guildId].active.push({"name" : name, "chId" : v.id, "userId" : id, "startTime" : Date.now(), "gldId" : msg.guildId, "initChId" : msg.channel.id});
 
  
         writeData();
@@ -283,29 +283,28 @@ function setWaiting(msg, words)
     // console.log(k);
 }
 
-function getPadejById(msg, str)
+async function getPadejById(guildId, userId)
 {
     let padej;
     if(data != null)
     {
-        if(data["g" + msg.guildId] != null)
+        if(data["g" + guildId] != null)
         {
-            if(data["g" + msg.guildId]["u" + str] != null)
+            if(data["g" + guildId]["u" + userId] != null)
             {
-                if(data["g" + msg.guildId]["u" + str].padej != null)
-                    return data["g" + msg.guildId]["u" + str].padej;
+                if(data["g" + guildId]["u" + userId].padej != null)
+                {
+                    console.log("here");
+                    return data["g" + guildId]["u" + userId].padej;
+
+                }
             }
         } 
     }
+    console.log("not here")
 
-    if(msg.mentions.users.size > 0)
-    {
-        padej = msg.mentions.users.first().username;
-    }
-    else if(msg.mentions.roles.size > 0)
-    {
-        padej = msg.mentions.roles.first().name;
-    }
+    let user = await client.users.fetch(userId);
+    padej = user.username;
     if(padej == null)
     {
         msg.channel.send("Error 100");
@@ -352,10 +351,7 @@ async function setMove(msg, words)
             msg.channel.send("Channel not found");
 
     }
-    // for(let i = 0; i < channels.size; i++)
-    // {
-    //     console.log("Channel: " + channels.at(i).name);
-    // }
+
 
 }
 
@@ -367,6 +363,8 @@ client.once('ready', async ()=>
     let cc = 0;
     for (var [gkey, gvalue] of Object.entries(data)) 
     {
+        if(gvalue.active == null)
+            gvalue.active = [];
         for(let i = 0; i < gvalue.active.length; i++)
         {
             try
@@ -482,6 +480,7 @@ client.on('voiceStateUpdate', async (old, newc) =>
     }
     
     // console.log(ob);
+    let guild = await client.guilds.fetch(ob.guild.id);
     let ch = await client.channels.fetch(ob.channelId);
     let us = await client.users.fetch(ob.id);
     process.stdout.write(us.tag + " has " + ((joined) ? "joined" : "left") + " the channel " + ch.name + " on " + ob.guild.name + "\n");
@@ -496,10 +495,28 @@ client.on('voiceStateUpdate', async (old, newc) =>
     for(let i = 0; i < data["g" + ob.guild.id].active.length; i++)
     {
         let wait = data["g" + ob.guild.id].active[i];
-        if(wait.userId == us.id)
+
+        if(wait.userId != us.id)
+            continue;
+        
+        if(wait.chId != ob.channelId)
+            continue;
+            
+        let gen = await client.channels.fetch("198395676663480321");
+        for(let j = 0; j < guild.members.cache.size; j++)
         {
-            console.log("End wait for " + ch.name);
+            if(guild.members.cache.at(j).voice.channelId == ob.channelId)
+                guild.members.cache.at(j).voice.setChannel(gen);
         }
+
+        let messageChannel = await client.channels.fetch(wait.initChId);
+        let pad = await getPadejById(guild.id, us.id);
+        messageChannel.send("Дождались " + pad + " :clap:");
+        ch.delete();
+        data["g" + ob.guild.id].active.splice(i, 1);
+
+        break;
+        
     }
 
 
