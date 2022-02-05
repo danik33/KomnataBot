@@ -73,6 +73,7 @@ function writeData()
 
 var data;
 process.stdout.write('\033c');
+console.log("-------------------------------");
 console.log("Starting..");
 
 fs.readFile("data.json", (err, inp) => {
@@ -314,6 +315,51 @@ function getPadejById(msg, str)
 }
 
 
+function formatText(str)
+{
+    return str.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+async function setMove(msg, words)
+{
+    if(words.length <= 0)
+        return;
+    let channels = await msg.guild.channels.fetch();
+    let ch = channels.find(e => {
+        if(e.type != 'GUILD_VOICE')
+            return false;
+        return formatText(e.name) == formatText(words[0]);
+    });
+    if(ch != null)
+    {
+        if(data["g" + msg.guildId] == null)
+            data["g" + msg.guildId] = {};
+        data["g" + msg.guildId].moveto = ch.id;
+        writeData();
+        msg.channel.send("Successfully set default moving channel");
+        console.log("Channel found %s:[%s]", ch.name, ch.id);
+    }
+    else
+    {
+        let ch2 = channels.find(e => {
+            if(e.type == 'GUILD_VOICE')
+                return false;
+            return formatText(e.name) == formatText(words[0]);
+        });
+        if(ch2 != null)
+            msg.channel.send("[" + ch2.name + "] is not a voice channel");
+        else
+            msg.channel.send("Channel not found");
+
+    }
+    // for(let i = 0; i < channels.size; i++)
+    // {
+    //     console.log("Channel: " + channels.at(i).name);
+    // }
+
+}
+
+
 
 
 client.once('ready', async ()=> 
@@ -361,33 +407,37 @@ client.on('messageCreate', message => {
     if(message.author.id == selfID)
         return;
 
-    let msg = message.content;
+    let msg = formatText(message.content);
 
-    msg = msg.toLowerCase();
-    msg = msg.replace(/\s+/g, ' ').trim();
 
     let words = msg.split(" ");
 
     
+    let fWord = words.shift();
 
-    if(words[0] == "addalias" || words[0] == "addnick")
+    if(fWord == "addalias" || fWord == "addnick")
     {
-        addAlias(message, words.splice(1));
+        addAlias(message, words);
     }
 
-    if(words[0] == "setpadej")
+    if(fWord == "setpadej")
     {
-        setPadej(message, words.splice(1));
+        setPadej(message, words);
     }
 
     if(msg.includes("sosi"))
     {
         message.channel.send("bibu)");
+
     }
     
-    if(words[0] == "ждём" || words[0] == "ждать")
+    if(fWord == "ждём" || fWord == "ждать")
     {
-        setWaiting(message, words.splice(1));
+        setWaiting(message, words);
+    }
+    if(fWord == "setmove")
+    {
+        setMove(message, words);
     }
 
     if(msg.includes("join"))
@@ -419,30 +469,36 @@ client.on('messageCreate', message => {
 client.on('voiceStateUpdate', async (old, newc) => 
 {
     let ob;
-    let str;
+    let joined;
     if(old.channelId == null && newc.channelId != null)
     {
         ob = newc;
-        str = "joined"
+        joined = true;
     }
     else
     {
         ob = old;
-        str = "left"
+        joined = false;
     }
     
     // console.log(ob);
     let ch = await client.channels.fetch(ob.channelId);
     let us = await client.users.fetch(ob.id);
-    process.stdout.write(us.username + " has " + str + " the channel " + ch.name + " on " + ob.guild.name + "\n");
-
-    if(data["c" + channelId] != null )
-
-    for(let i = 0; i < data.active.length; i++)
+    process.stdout.write(us.tag + " has " + ((joined) ? "joined" : "left") + " the channel " + ch.name + " on " + ob.guild.name + "\n");
+    
+    if(!joined)
+        return;
+    if(data["g" + ob.guild.id] == null)
+        return;
+    if(data["g" + ob.guild.id].active == null)
+        return;
+    
+    for(let i = 0; i < data["g" + ob.guild.id].active.length; i++)
     {
-        if(ob.id == data[i].userId && ch )
+        let wait = data["g" + ob.guild.id].active[i];
+        if(wait.userId == us.id)
         {
-            console.log("End waiting");
+            console.log("End wait for " + ch.name);
         }
     }
 
