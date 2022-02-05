@@ -2,6 +2,7 @@ const DS = require('discord.js');
 const { Client, Intents } = require('discord.js');
 const fs = require('fs');
 require("dotenv").config();
+const { joinVoiceChannel } = require('@discordjs/voice');
 
 
 var gmsg;
@@ -12,6 +13,9 @@ const selfID = "938855475909386270";
 const client = new Client({
     intents: [
         Intents.FLAGS.GUILDS,
+        Intents.FLAGS.GUILD_MEMBERS,
+        Intents.FLAGS.GUILD_PRESENCES,
+        Intents.FLAGS.GUILD_VOICE_STATES,
         Intents.FLAGS.DIRECT_MESSAGES,
         Intents.FLAGS.GUILD_MESSAGES
     ]
@@ -20,28 +24,32 @@ const client = new Client({
 
 
 
-process.stdin.resume();
+// process.stdin.resume();
 
-function exitHandler(options, exitCode) {
-    if (options.cleanup) console.log('clean');
-    if (exitCode || exitCode === 0) console.log(exitCode);
-    if (options.exit) process.exit();
-}
+// async function exitHandler(options, exitCode) {
+//     console.log("Exiting..");
+//     client.destroy();
+//     await sleep(2000);
+//     console.log("destroyed");
+//     if (options.cleanup) console.log('clean');
+//     if (exitCode || exitCode === 0) console.log(exitCode);
+//     if (options.exit) process.exit();
+// }
 
-//do something when app is closing
-process.on('exit', exitHandler.bind(null,{cleanup:true}));
+// //do something when app is closing
+// process.on('exit', exitHandler.bind(null,{cleanup:true}));
 
-//catches ctrl+c event
-process.on('SIGINT', exitHandler.bind(null, {exit:true}));
+// //catches ctrl+c event
+// process.on('SIGINT', exitHandler.bind(null, {exit:true}));
 
 
 
-// catches "kill pid" (for example: nodemon restart)
-process.on('SIGUSR1', exitHandler.bind(null, {exit:true}));
-process.on('SIGUSR2', exitHandler.bind(null, {exit:true}));
+// // catches "kill pid" (for example: nodemon restart)
+// process.on('SIGUSR1', exitHandler.bind(null, {exit:true}));
+// process.on('SIGUSR2', exitHandler.bind(null, {exit:true}));
 
-//catches uncaught exceptions
-process.on('uncaughtException', exitHandler.bind(null, {exit:true}));
+// //catches uncaught exceptions
+// process.on('uncaughtException', exitHandler.bind(null, {exit:true}));
 
 
 
@@ -79,6 +87,7 @@ fs.readFile("data.json", (err, inp) => {
             else
             {
                 console.log("Sucsessfully created file !");
+                data = {};
             }
         })
     }
@@ -105,7 +114,7 @@ function idFromMention(st)
 }
 function addAlias(msg, words)
 {
-    let channelID = msg.guildId;
+    let guildId = msg.guildId;
     let userID;
     let self = false;
     if(words.length == 1)
@@ -135,33 +144,35 @@ function addAlias(msg, words)
 
         }
     }
-    
-    let ch = data["c" + channelID];
 
-    if(ch == null)
+    if(data["g" + guildId] == null)
+        data["g" + guildId] = {};
+    let gld = data["g" + guildId];
+
+    if(gld == null)
     {
-        ch = {
+        gld = {
             
         }
     }
-    if(ch["u" + userID] == null)
+    if(gld["u" + userID] == null)
     {
-        ch["u" + userID] = {
+        gld["u" + userID] = {
             aliases : []
         }
     }
 
     let d = (self) ? 0 : 1;
 
-    if(ch["u" + userID].aliases.includes(words[d]))
+    if(gld["u" + userID].aliases.includes(words[d]))
     {
         msg.channel.send("Alias already exists");
     }
     else
     {
-        ch["u" + userID].aliases.push(words[d]);
+        gld["u" + userID].aliases.push(words[d]);
 
-        data["c" + channelID] = ch;
+        data["g" + guildId] = gld;
 
         msg.channel.send("Alias successfuly added.");
 
@@ -172,7 +183,6 @@ function addAlias(msg, words)
 
 function setPadej(msg, words)
 {
-    let channelID = msg.guildId;
     let userID;
     let self = false;
     if(words.length == 1)
@@ -203,17 +213,19 @@ function setPadej(msg, words)
         }
     }
     
-    let ch = data["c" + channelID];
+    if(data["g" + msg.guildId] == null)
+        data["g" + msg.guildId] = {};
+    let gld = data["g" + msg.guildId];
 
-    if(ch == null)
+    if(gld == null)
     {
-        ch = {
+        gld = {
             
         }
     }
-    if(ch["u" + userID] == null)
+    if(gld["u" + userID] == null)
     {
-        ch["u" + userID] = {
+        gld["u" + userID] = {
             aliases : []
         }
     }
@@ -221,9 +233,9 @@ function setPadej(msg, words)
     let d = (self) ? 0 : 1;
 
 
-    ch["u" + userID].padej = words[d];
+    gld["u" + userID].padej = words[d];
 
-    data["c" + channelID] = ch;
+    data["g" + msg.guildId] = gld;
 
     writeData();
 
@@ -235,6 +247,7 @@ function setPadej(msg, words)
 
 function setWaiting(msg, words)
 {
+    console.log("Wait call");
     let id = idFromMention(words[0]);
     let padej = getPadejById(msg, id);
     padej = padej.charAt(0).toUpperCase() + padej.slice(1);
@@ -253,9 +266,15 @@ function setWaiting(msg, words)
             allow: ['VIEW_CHANNEL']
         }]
     }).then(v => {
-        if(data.active == null)
-            data.active = [];
-        data.active.push({"name" : name, "chId" : v.id, "userId" : id, "startTime" : Date.now(), "gldId" : msg.guildId});
+        if(data["g" + msg.guildId] == null)
+            data["g" + msg.guildId] = {};
+        
+        if(data["g" + msg.guildId].active == null)
+            data["g" + msg.guildId].active = [];
+        
+        data["g" + msg.guildId].active.push({"name" : name, "chId" : v.id, "userId" : id, "startTime" : Date.now(), "gldId" : msg.guildId});
+
+ 
         writeData();
         msg.channel.send("Комната ожидания " + padej);
     });
@@ -268,12 +287,12 @@ function getPadejById(msg, str)
     let padej;
     if(data != null)
     {
-        if(data["c" + msg.guildId] != null)
+        if(data["g" + msg.guildId] != null)
         {
-            if(data["c" + msg.guildId]["u" + str] != null)
+            if(data["g" + msg.guildId]["u" + str] != null)
             {
-                if(data["c" + msg.guildId]["u" + str].padej != null)
-                    return data["c" + msg.guildId]["u" + str].padej;
+                if(data["g" + msg.guildId]["u" + str].padej != null)
+                    return data["g" + msg.guildId]["u" + str].padej;
             }
         } 
     }
@@ -297,17 +316,44 @@ function getPadejById(msg, str)
 
 
 
-client.once('ready', ()=> 
+client.once('ready', async ()=> 
 {
+    let cc = 0;
+    for (var [gkey, gvalue] of Object.entries(data)) 
+    {
+        for(let i = 0; i < gvalue.active.length; i++)
+        {
+            try
+            {
+                await client.channels.fetch(gvalue.active[i].chId);
+            }
+            catch(er)
+            {
+                if(er instanceof DS.DiscordAPIError)
+                {
+                    console.log("Deleting wait data for " + gvalue.active[i].name);
+                    gvalue.active.splice(i--, 1);
+                    cc++;
+                }
+            }
+            
+        }
+    }
+    if(cc > 0)
+    {
+        console.log("Deleted %d channels", cc);
+        writeData();
+    }
+    
     
     console.log("Ready");
+
+    
     monitor();
 });
 
 
-client.on('voiceStateChange', (a, b) => {
-    console.log("state");
-});
+
 
 client.on('messageCreate', message => {
 
@@ -339,24 +385,78 @@ client.on('messageCreate', message => {
         message.channel.send("bibu)");
     }
     
-    if(words[0] == "ждём")
+    if(words[0] == "ждём" || words[0] == "ждать")
     {
         setWaiting(message, words.splice(1));
     }
 
-    if(msg.includes("check"))
+    if(msg.includes("join"))
     {
-        monitor(message);
-        console.log(message.guild.channels.cache);
+        let ss = async () => {
+            let a = await client.guilds.fetch('198395676663480320');
+            // console.log(a);
+            let con = joinVoiceChannel({
+                channelId: "939446186945970177",
+                guildId: "198395676663480320",
+                adapterCreator: a.voiceAdapterCreator
+            });
+            let time = 5000;
+            if(words[1] != null && !isNaN(words[1]))
+            {
+                time = parseFloat(words[1])*1000;
+            }
+            await sleep(time);
+            con.destroy();
+
+        }
+        ss();
+        
     }
     
 
 });
 
+client.on('voiceStateUpdate', async (old, newc) => 
+{
+    let ob;
+    let str;
+    if(old.channelId == null && newc.channelId != null)
+    {
+        ob = newc;
+        str = "joined"
+    }
+    else
+    {
+        ob = old;
+        str = "left"
+    }
+    
+    // console.log(ob);
+    let ch = await client.channels.fetch(ob.channelId);
+    let us = await client.users.fetch(ob.id);
+    process.stdout.write(us.username + " has " + str + " the channel " + ch.name + " on " + ob.guild.name + "\n");
+
+    if(data["c" + channelId] != null )
+
+    for(let i = 0; i < data.active.length; i++)
+    {
+        if(ob.id == data[i].userId && ch )
+        {
+            console.log("End waiting");
+        }
+    }
+
+
+    
+    
+});
+
+
+ 
 var count = 0;
 async function monitor(msg)
 {
-    while(true)
+    while(false)
     {
         console.log("--------------------------");
 
@@ -364,22 +464,54 @@ async function monitor(msg)
         {
             for(let i = 0; i < data.active.length; i++)
             {
-                for(let j = 0; j < client.guilds.cache.size; j++)
+                // console.log("A ?");
+                
+                try
                 {
-                    let gld = client.guilds.cache.at(j);
-                    if(data.active[i].gldId == gld.id)
-                    {
-                        console.log(gld.channels);
-                        // for(let z = 0; z < client.channels.cache.size; z++)
-                        // {
-                        //     if(client.channels.cache.at(z).id == data.active[i].chId)
-                        //     {
-                        //         console.log()
-                        //         console.log("Here it is(%d): %s:[%s]", z, client.channels.cache.at(z).name, client.channels.cache.at(z).id);
-                        //     }
-                        // }
-                    }
+                    client.channels.fetch(data.active[i].chId)
+                    .then(ch => {
+                        if(ch.members.size > 0)
+                        {
+                            console.log(ch.members.at(0).user.username);
+
+                        }
+                        else
+                        {
+                            console.log("Empty voice");
+                        }
+                    });
+                    // if(a.members.at(0) != null)
+                    //     console.log(a.members.at(0).user.username);
+                    // else
+                    //     console.log("Empty ?");
+                    
                 }
+                catch(e)
+                {
+                    console.log(e);
+                    // console.log("Error finding %s, deleting..", data.active[i].name);
+                    // data.active.splice(i, 1);
+                    // writeData();
+                }
+
+
+                // for(let j = 0; j < client.guilds.cache.size; j++)
+                // {
+                //     let gld = client.guilds.cache.at(j);
+                //     if(data.active[i].gldId == gld.id)
+                //     {
+                //         // console.log(gld.channels.cache.at(1).name);
+                //         for(let z = 0; z < gld.channels.cache.size; z++)
+                //         {
+                //             if(client.channels.cache.at(z).id == data.active[i].chId)
+                //             {
+                //                 console.log("Here it is(%d): %s:[%s]", z, client.channels.cache.at(z).name, client.channels.cache.at(z).id);
+                //                 // console.log(client.channels.cache.at(z).members);
+
+                //             }
+                //         }
+                //     }
+                // }
                 
             }
             // client.channels.cache.map(e =>{
@@ -389,7 +521,6 @@ async function monitor(msg)
 
         }
         count++;
-        console.log("--------------------------");
         await sleep(5000);
         
 
