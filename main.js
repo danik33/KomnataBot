@@ -59,13 +59,18 @@ function sleep(ms) {
 
 function writeData()
 {
-    fs.writeFile("data.json", JSON.stringify(data, null, 2), (err) => {
-        if(err)
-        {
-            console.log("Error at writing data");
-        }
-       
-    })
+    return new Promise(res => {
+        fs.writeFile("data.json", JSON.stringify(data, null, 2), (err) => {
+            if(err)
+            {
+                console.log("Error at writing data");
+            }
+            res();
+           
+        });
+
+    });
+    
 }
 
 var data;
@@ -87,7 +92,7 @@ fs.readFile("data.json", (err, inp) => {
                 console.log("Sucsessfully created file !");
                 data = {};
             }
-        })
+        });
     }
     else
     {
@@ -110,79 +115,286 @@ function idFromMention(st)
     return st.slice(3, -1)
     // console.log("Here is string:", a);
 }
-function addAlias(msg, words)
+
+function aliasToId(alias, guildId)
 {
-    let guildId = msg.guildId;
-    let userID;
-    let self = false;
-    if(words.length == 1)
+    let aliases = getAllGuildAliases(guildId);
+    for(let i = 0; i < aliases.length; i++)
     {
-        if(isMention(words[0]))
+        if(aliases[i].alias == alias)
         {
-            msg.channel.send("Incorrect use of addAlias, use /pomogite for help");
-            return;
-        }
-        else
-        {
-            userID = msg.author.id;
-            self = true;
-        }
-        
-    }
-    else
-    {
-
-        if(isMention(words[0]))
-        {
-            userID = idFromMention(words[0])
-        }
-        else
-        {
-            return;
+            return aliases[i].id;
 
         }
     }
+    return null;
 
+}
+
+
+
+function aliasExists(guildId, alias)
+{
     if(data["g" + guildId] == null)
+        return false;
+    
+    for (var [ingkey, ingvalue] of Object.entries(data["g" + guildId])) 
+    {
+        if(ingkey.charAt(0) == "u")
+        {
+            if(ingvalue.aliases == null)
+                continue;
+            for(let i = 0; i < ingvalue.aliases.length; i++)
+            {
+                if(ingvalue.aliases[i] == alias)
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function getAllGuildAliases(guildId)
+{
+    let aliases = [];
+    if(data["g" + guildId] == null)
+        return aliases;
+    
+    for (var [ingkey, ingvalue] of Object.entries(data["g" + guildId])) 
+    {
+        if(ingkey.charAt(0) == "u")
+        {
+            if(ingvalue.aliases == null)
+                continue;
+            for(let i = 0; i < ingvalue.aliases.length; i++)
+            {
+                
+                aliases.push({alias: ingvalue.aliases[i], id: ingkey.substring(1)});
+            }
+        }
+    }
+
+    return aliases;
+    
+}
+
+function getUserAliases(guildId, userId)
+{
+    if(data["g" + guildId] == null)
+        return null;
+
+    if(data["g" + guildId]["u" + userId] == null)
+        return null;
+
+    if(data["g" + guildId]["u" + userId].aliases == null)
+        return null;
+    
+    return data["g" + guildId]["u" + userId].aliases;
+    
+    
+}
+
+/**
+ * Adds alias to data
+ * @param {string}  guildId     Guild id.
+ * @param {string}  userId      User id to which add alias
+ * @param {string}  alias       The alias you want to add
+ * @param {boolean} writeData   Whetever to call WriteData at the end of the function
+ * @returns 
+ * Object with code and user
+ * codes:
+ * 0 - Alias already exists in user 
+ * 1 - Succsessfuly added alias
+ * -1 - Alias already taken by other user (object.user)
+ */
+async function dataAddAlias(guildId, userId, alias, writeData)
+{
+    if(data["g" + guildId] == null) 
         data["g" + guildId] = {};
-    let gld = data["g" + guildId];
 
-    if(gld == null)
-    {
-        gld = {
-            
-        }
-    }
-    if(gld["u" + userID] == null)
-    {
-        gld["u" + userID] = {
-            aliases : []
-        }
-    }
 
-    let d = (self) ? 0 : 1;
+    if(data["g" + guildId]["u" + userId] == null)
+        data["g" + guildId]["u" + userId] = {};
 
-    if(gld["u" + userID].aliases.includes(words[d]))
+    
+
+    
+
+    if(data["g" + guildId]["u" + userId].aliases == null)
+        data["g" + guildId]["u" + userId].aliases = [];
+
+    let user = await client.users.fetch(userId);
+
+    if(data["g" + guildId]["u" + userId].aliases.includes(alias)) //Already exists
     {
-        msg.channel.send("Alias already exists");
+        return {code: 0, user: user};
     }
     else
     {
-        gld["u" + userID].aliases.push(words[d]);
+        let id = aliasToId(alias, guildId);
+        if(id != null)  //Taken
+        {
+            let us = await client.users.fetch(id);
+            return {code: -1, user: us}
+        }
+        data["g" + guildId]["u" + userId].aliases.push(alias);
+        if(writeData)
+            writeData();
 
-        data["g" + guildId] = gld;
-
-        msg.channel.send("Alias successfuly added.");
-
-        writeData();
+        return {code: 1, user: user};
     }
+
+}
+
+async function addAlias(msg, words)
+{
+    let aliases = [];
+    let initIndex;
+    let id;
+
+    let user = await findUser(words[0], msg.guildId);
+    if(user == null)
+    {
+        initIndex = 0;
+        id = msg.author.id;
+    }
+    else
+    {
+        initIndex = 1;
+        id = user.id;
+    }
+
+    let toAdd = words.length-initIndex;
+    let succ = 0, exists = 0, taken = 0;
+
+    user = user || msg.author;
+    console.log("Adding %d aliases to %s", toAdd,  (user == null) ? msg.author.username : user.username);
+
+    let res = [];
+    for(let i = initIndex; i < words.length; i++)
+    {
+        let result = await dataAddAlias(msg.guildId, id, words[i]);
+        res.push(result);
+        if(result.code == 1)
+            succ++;
+        if(result.code == 0)
+            exists++;
+        if(result.code == -1)
+            taken++;
+    }
+
+    console.log(succ);
+    console.log(exists);
+    console.log(taken);
+
+    if(res.length <= 1)
+    {
+        if(res[0].code == 1)
+            msg.channel.send("Added alias " + words[initIndex] + " to " + user.username); 
+        if(res[0].code == 0)
+            msg.channel.send("Alias alredy exists for user " + user.username);
+        if(res[0].code == -1)
+            msg.channel.send("Alias already taken by " + res[0].user.username);
+    }
+    else
+    {
+        str = "Attemted to add " + res.length + " aliases to " + user.username + ": ";
+        let comma = false;
+        if(succ > 0)
+        {
+            str += succ + " successful";
+            comma = true;
+        }
+        if(exists > 0)
+        {
+            if(comma)
+                str += ", "
+            str += exists + " already exists";
+            comma = true;
+        }
+        if(taken > 0)
+        {
+            if(comma)
+                str += ", "
+            str += taken + " already taken";
+        }
+        str += "."
+        msg.channel.send(str);
+    }
+    writeData();
+
+
+   
  
 }
 
-function setPadej(msg, words)
+
+
+function removeAlias(str, guildId)
 {
+    if(data["g" + guildId] == null)
+        return -1;
+
+    for (var [ingkey, ingvalue] of Object.entries(data["g" + guildId])) 
+    {
+        if(ingkey.charAt(0) == "u")
+        {
+            if(ingvalue.aliases == null)
+                continue;
+            for(let i = 0; i < ingvalue.aliases.length; i++)
+            {
+                if(ingvalue.aliases[i] == str)
+                {
+                    ingvalue.aliases.splice(i, 1);
+                    writeData();
+                    return ingkey.substring(1);
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+async function findUser(string, guildId)
+{
+    let id;
+    if(isMention(string))
+        id = idFromMention(string);
+    else
+        id = aliasToId(string, guildId);
+    
+    if(id == null)
+        return null;
+
+    return await client.users.fetch(id);
+    
+    // return aliasToId(string, guildId);
+        
+}
+
+async function setPadej(msg, words)
+{
+    // let id;
+    // if(isMention(words[0]))
+    // {
+    //     id = idFromMention(words[0]);
+    // }
+    // else
+    // {
+    //     id = aliasToId(words[0], msg.guildId);
+    // }
+
+    // if(id == null)
+    // {
+    //     console.log("User not found.");
+    //     return;
+    // }
+
     let userID;
     let self = false;
+    
+
     if(words.length == 1)
     {
         if(isMention(words[0]))
@@ -202,7 +414,7 @@ function setPadej(msg, words)
 
         if(isMention(words[0]))
         {
-            userID = idFromMention(words[0])
+            userID = idFromMention(words[0]);
             
         }
         else
@@ -220,10 +432,26 @@ function setPadej(msg, words)
         data["g" + msg.guildId]["u" + userID] = {};
 
 
+    if(data["g" + msg.guildId]["u" + userID].aliases == null)
+        data["g" + msg.guildId]["u" + userID].aliases = [];
 
     let d = (self) ? 0 : 1;
 
+    let id = aliasToId(words[d], msg.guildId);
+    if(id != null)
+    {
+        let us = await client.users.fetch(id);
+        msg.channel.send("Padej mush be also an alias, which is taken by " + us.username);
+        return;
+    }
 
+    if(data["g" + msg.guildId]["u" + userID].padej != null)
+    {
+        console.log('here ?');
+        console.log(removeAlias(data["g" + msg.guildId]["u" + userID].padej, msg.guildId));
+    }
+
+    data["g" + msg.guildId]["u" + userID].aliases.push(words[d]);
     data["g" + msg.guildId]["u" + userID].padej = words[d];
 
 
@@ -237,8 +465,22 @@ function setPadej(msg, words)
 
 async function setWaiting(msg, words)
 {
-    console.log("Wait call");
-    let id = idFromMention(words[0]);
+    let id;
+    if(isMention(words[0]))
+    {
+        id = idFromMention(words[0]);
+    }
+    else
+    {
+        id = aliasToId(words[0], msg.guildId);
+    }
+
+    if(id == null)
+    {
+        console.log("User not found.");
+        return;
+    }
+
     let padej = await getPadejById(msg.guildId, id);
     padej = padej.charAt(0).toUpperCase() + padej.slice(1);
 
@@ -252,7 +494,7 @@ async function setWaiting(msg, words)
     msg.guild.channels.create(name, {
         type: 'GUILD_VOICE',
         permissionOverwrites: [{
-            id: msg.guild.id,
+            id: msg.guildId,
             allow: ['VIEW_CHANNEL']
         }]
     }).then(v => {
@@ -306,6 +548,70 @@ function formatText(str)
     return str.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+async function endWait(guildId, index)
+{
+    console.log("End start: " + guildId);
+    let guild = await client.guilds.fetch(guildId);
+    let ch = await client.channels.fetch(data["g" + guildId].active[index].chId);
+    let moveto;
+    if(data["g" + guildId].moveto != null)
+    {
+        moveto = await client.channels.fetch(data["g" + guild.id].moveto);
+    }
+    else
+    {
+        let channels = await guild.channels.fetch();
+        moveto = channels.find(e => {
+            if(e.type != 'GUILD_VOICE')
+                return false;
+            return formatText(e.name).includes(formatText("gen"));
+        });
+        if(moveto == null)
+        {
+            
+            for(let k = 0; k < channels.size; k++)
+            {
+                if(channels.at(k).type == "GUILD_VOICE")
+                {
+                    moveto = channels.at(k);
+                    break;
+                }
+            }
+                
+        }
+    }
+    
+    if(moveto == null)
+    {
+        console.log("error no voice channels");
+        return;
+    }
+
+
+
+    
+
+
+
+
+
+    for(let j = 0; j < guild.members.cache.size; j++)
+    {
+        if(guild.members.cache.at(j).voice.channelId == data["g" + guildId].active[index].chId)
+            await guild.members.cache.at(j).voice.setChannel(moveto);
+    }
+
+    let messageChannel = await client.channels.fetch(data["g" + guildId].active[index].initChId);
+    let pad = await getPadejById(guild.id, data["g" + guildId].active[index].userId);
+    messageChannel.send("Дождались дебила)");
+    ch.delete();
+    data["g" + guildId].active.splice(index, 1);
+
+    writeData();
+
+
+}
+
 async function setMove(msg, words)
 {
     if(words.length <= 0)
@@ -344,44 +650,141 @@ async function setMove(msg, words)
 
 
 
+async function initCheckGuild(guildId)
+{
+    return new Promise(async res => 
+    {
+        let promises = [];
+        let gvalue = data["g" + guildId];
+        let rewrite = false;
+        if(gvalue.active != null && gvalue.active.length > 0)
+        {
+            for(let i = 0; i < gvalue.active.length; i++)
+            {
+                
+                let p = client.channels.fetch(gvalue.active[i].chId)
+                .then(e => {
+                    for(let j = 0; j < e.members.size; j++)
+                    {
+                        if(e.members.at(j).id == gvalue.active[i].userId)
+                        {
+                            promises.push(endWait(guildId, i));
+
+                            console.log("Channel end wait (%s): " + e.name, "End wait" );
+                        }
+                    }
+                    
+                }).catch(e => {
+                    if(e instanceof DS.DiscordAPIError)
+                    {
+                        gvalue.active.splice(i--, 1);
+                        rewrite = true;
+                    }
+                    else
+                    {
+                        console.log(e);
+                    }
+
+                });
+                
+
+                
+                promises.push(p);
+                
+                
+            }
+
+            Promise.all(promises).then(() => {
+                console.log("End promises %d on " + guildId, promises.length);
+                
+                res(rewrite);
+
+            });
+
+        }
+        else
+        {
+            res(rewrite);
+        }
+        
+        
+
+    });
+    
+}
+
 
 client.once('ready', async ()=> 
 {
     let cc = 0;
+    let promises = []
     for (var [gkey, gvalue] of Object.entries(data)) 
     {
-        if(gvalue.active == null)
-            gvalue.active = [];
-        for(let i = 0; i < gvalue.active.length; i++)
-        {
-            try
-            {
-                await client.channels.fetch(gvalue.active[i].chId);
-            }
-            catch(er)
-            {
-                if(er instanceof DS.DiscordAPIError)
-                {
-                    console.log("Deleting wait data for " + gvalue.active[i].name);
-                    gvalue.active.splice(i--, 1);
-                    cc++;
-                }
-            }
-            
-        }
+        promises.push(initCheckGuild(gkey.substring(1)));
+        
     }
-    if(cc > 0)
+    
+    Promise.all(promises).then(arr => 
     {
-        console.log("Deleted %d channels", cc);
-        writeData();
-    }
-    
-    
-    console.log("Ready");
+        for(let i = 0; i < arr.length; i++)
+        {
+            if(arr[i])
+                cc++;
+        }
+        if(cc > 0)
+        {
+            console.log("Deleted %d channels", cc);
+            writeData();
+        }
+        
+        
+        console.log("Ready");
+
+    })
 
     
-    monitor();
+
+    
+    // monitor();
 });
+
+
+async function getAliases(msg, words)
+{
+    console.log(words);
+    let user;
+    if(words.length > 0)
+    {
+        user = await findUser(words[0], msg.guildId);
+        if(user == null)
+        {
+            msg.channel.send("User not found");
+            return;
+        }
+    }
+    else
+    {
+        user = msg.author;
+    }
+
+
+    let aliases = getUserAliases(msg.guildId, user.id);
+    if(aliases == null || aliases.length == 0)
+    {
+        msg.channel.send("No aliases for " + user.username + " yet");
+        return;
+    }
+    
+    let str = "Aliases for " + user.username + ": [";
+    for(let i = 0; i < aliases.length; i++)
+    {
+        str += "#" + (i+1) + ":" + aliases[i];
+        if(i < aliases.length-1)
+            str += ", ";
+    }
+    str += "]";
+    msg.channel.send(str);
+}
 
 
 
@@ -400,46 +803,70 @@ client.on('messageCreate', message => {
     
     let fWord = words.shift();
 
-    if(fWord == "addalias" || fWord == "addnick" || fWord == "nick" || fWord == "alias")
+    
+    if(fWord == "addalias" || fWord == "addnick" || fWord == "nick" || fWord == "alias" || fWord == "+ник" )
     {
+        if(words.length == 0)
+        {
+            message.channel.send("Incorrect use of addAlias, use /pomogite for help");
+            return;
+        }
         addAlias(message, words);
     }
 
-    if(fWord == "padej")
+    if(fWord == "padej" || fWord == "падеж" || fWord == "+падеж")
     {
+        if(words.length == 0)
+        {
+            message.channel.send("Incorrect use of setPadej, use /pomogite for help");
+            return;
+        }
         setPadej(message, words);
     }
 
     if(msg.includes("sosi"))
     {
+        console.log(client.channels.cache.at(0).send("hehe"));
         message.channel.send("bibu)");
-
     }
     
-    if(fWord == "ждём" || fWord == "ждать")
+    if(fWord == "ждём" || fWord == "ждать" || fWord == "wait" || fWord == "jdem")
     {
+        if(words.length == 0)
+        {
+            return;
+        }
         setWaiting(message, words);
     }
     if(fWord == "moveto")
     {
+        if(words.length == 0)
+        {
+            message.channel.send("Incorrect use of moveto, use /pomogite for help");
+            return;
+        }
         setMove(message, words);
+    }
+    if(fWord == "getnicks" || fWord == "ники" || fWord == "aliases")
+    {
+        getAliases(message, words);
     }
 
     if(msg.includes("join"))
     {
         let ss = async () => {
-            let a = await client.guilds.fetch('198395676663480320');
+            let a = await client.guilds.fetch(message.guildId);
             // console.log(a);
             let con = joinVoiceChannel({
-                channelId: "939542412768981043",
-                guildId: "198395676663480320",
+                channelId: words[0],
+                guildId: message.guildId,
                 adapterCreator: a.voiceAdapterCreator
             });
             let time = 5000;
-            if(words[0] != null)
+            if(words[1] != null)
             {
                 console.log("a ?");
-                time = parseFloat(words[0])*1000;
+                time = parseFloat(words[1])*1000;
             }
             console.log("Time: " + time);
             await sleep(time);
@@ -495,70 +922,10 @@ client.on('voiceStateUpdate', async (old, newc) =>
             continue;
 
         console.log("End wait on " + ch.name);
+
+        endWait(guild.id, i);
         
-        let moveto;
-        if(data["g" + guild.id].moveto != null)
-        {
-            moveto = await client.channels.fetch(data["g" + guild.id].moveto);
-            console.log("First channel");
-
-        }
-        else
-        {
-            let channels = await guild.channels.fetch();
-            moveto = channels.find(e => {
-                if(e.type != 'GUILD_VOICE')
-                    return false;
-                return formatText(e.name).includes(formatText("gen"));
-            });
-            if(moveto == null)
-            {
-                console.log("Third channel");
-                
-                for(let k = 0; k < channels.size; k++)
-                {
-                    if(channels.at(k).type == "GUILD_VOICE")
-                    {
-                        moveto = channels.at(k);
-                        break;
-                    }
-                }
-                    
-            }
-            else
-            {
-                console.log("Second channel");
-
-            }
-        }
         
-        if(moveto == null)
-        {
-            console.log("error no voice channels");
-            return;
-        }
-
-
-        
-
-
-
-
-     
-        for(let j = 0; j < guild.members.cache.size; j++)
-        {
-            if(guild.members.cache.at(j).voice.channelId == ob.channelId)
-                await guild.members.cache.at(j).voice.setChannel(moveto);
-        }
-
-        let messageChannel = await client.channels.fetch(wait.initChId);
-        let pad = await getPadejById(guild.id, us.id);
-        messageChannel.send("Дождались дебила)");
-        ch.delete();
-        data["g" + ob.guild.id].active.splice(i, 1);
-        writeData();
-
-        break;
         
     }
 
@@ -568,79 +935,6 @@ client.on('voiceStateUpdate', async (old, newc) =>
 });
 
 
- 
-var count = 0;
-async function monitor(msg)
-{
-    while(false)
-    {
-        console.log("--------------------------");
 
-        if(data.active != null && data.active.length > 0)
-        {
-            for(let i = 0; i < data.active.length; i++)
-            {
-                // console.log("A ?");
-                
-                try
-                {
-                    client.channels.fetch(data.active[i].chId)
-                    .then(ch => {
-                        if(ch.members.size > 0)
-                        {
-                            console.log(ch.members.at(0).user.username);
-
-                        }
-                        else
-                        {
-                            console.log("Empty voice");
-                        }
-                    });
-                    // if(a.members.at(0) != null)
-                    //     console.log(a.members.at(0).user.username);
-                    // else
-                    //     console.log("Empty ?");
-                    
-                }
-                catch(e)
-                {
-                    console.log(e);
-                    // console.log("Error finding %s, deleting..", data.active[i].name);
-                    // data.active.splice(i, 1);
-                    // writeData();
-                }
-
-
-                // for(let j = 0; j < client.guilds.cache.size; j++)
-                // {
-                //     let gld = client.guilds.cache.at(j);
-                //     if(data.active[i].gldId == gld.id)
-                //     {
-                //         // console.log(gld.channels.cache.at(1).name);
-                //         for(let z = 0; z < gld.channels.cache.size; z++)
-                //         {
-                //             if(client.channels.cache.at(z).id == data.active[i].chId)
-                //             {
-                //                 console.log("Here it is(%d): %s:[%s]", z, client.channels.cache.at(z).name, client.channels.cache.at(z).id);
-                //                 // console.log(client.channels.cache.at(z).members);
-
-                //             }
-                //         }
-                //     }
-                // }
-                
-            }
-            // client.channels.cache.map(e =>{
-            //     console.log(e.id)
-            // });
-            // console.log(data.active);
-
-        }
-        count++;
-        await sleep(5000);
-        
-
-    }
-}
 
 client.login(process.env.TOKEN);

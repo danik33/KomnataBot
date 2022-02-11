@@ -1,0 +1,26 @@
+Done: 
+
+1. On startup check if any wait is over 
+2. Multiple aliases per command 
+
+
+
+
+-----------------
+WIP:
+3. Multiple waits per room/command
+4. Settings per guild
+{
+    4.1 Timeout enable/disable and default room timeout : Default - enable, 1 hour
+    4.2 Kill rooms on exit enable/disable : Default - disable
+    4.3 Custom commands name
+    4.4 Command symbol change : Default [+ or none]
+    4.5 Auto-move if in a room : Default enable
+    .
+    .
+}
+5. Check if guild has Voice only category, and create the room there
+6. Every command could work with aliases
+7. Embed join channel on start waiting room
+8. Add /help
+9. Remove aliases / clear aliases
